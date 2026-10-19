@@ -180,6 +180,12 @@ fun AccountsScreen() {
                     style = McType.Callout,
                 )
                 WelcomeButton(
+                    "大图诊断：${io.movieclaw.androidtv.ui.stage.StageDiag.label}",
+                    onClick = { io.movieclaw.androidtv.ui.stage.StageDiag.next() },
+                    icon = McIcons.Info,
+                    style = McType.Callout,
+                )
+                WelcomeButton(
                     "检查更新",
                     onClick = { graph.appUpdate.checkNow(session) },
                     icon = McIcons.Info,

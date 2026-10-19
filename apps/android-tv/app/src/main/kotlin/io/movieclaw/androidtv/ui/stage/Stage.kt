@@ -42,8 +42,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.Shadow
@@ -140,7 +142,7 @@ fun StageBackdrop(
                     },
                 ),
         ) {
-            if (!fullImage && tint != null) {
+            if (!fullImage && tint != null && !StageDiag.imageOnly) {
                 // 边缘色铺满首屏，并在屏幕下沿之外再延伸 600pt 渐变到深炭灰：往下滚、背景上移时才露出这段过渡，
                 // 首屏里只有「剧照渐隐进边缘色」一段过渡（两段过渡夹一截平台在真机上会看出横线）
                 Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true)) {
@@ -153,7 +155,7 @@ fun StageBackdrop(
                     if (url != null) KenBurnsImage(url)
                 }
                 if (screenUrl != null && preview != null) preview(inPlace)
-                if (!fullImage) {
+                if (!fullImage && !StageDiag.imageOnly) {
                     Box(Modifier.fillMaxSize().drawBehind { drawRect(EasedFade.vertical(EasedFade.rising(animatedTint.value, fadeFrom))) })
                 }
             }
@@ -168,7 +170,13 @@ fun StageBackdrop(
                             ),
                         )
                     }
-                } else {
+                } else if (StageDiag.legacyScrim) {
+                    // 诊断：10-09 之前的画法——离屏先画横向渐变，再用纵向渐隐 DstIn
+                    Canvas(Modifier.fillMaxWidth().height(1080.pt).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+                        drawRect(Brush.horizontalGradient(*EasedFade.stops(Color.Black.copy(alpha = animatedStrength.value), 0.1f, 0.65f)))
+                        drawRect(Brush.verticalGradient(*EasedFade.stops(Color.Black, fadeFrom, 1f)), blendMode = BlendMode.DstIn)
+                    }
+                } else if (StageDiag.normal) {
                     // 横向托字黑 × 剧照下沿渐隐：两条渐变用 DstIn 合成成一个着色器，深浅用整笔的透明度给
                     // （原先是离屏先画横向渐变、再用纵向渐隐 DstIn，结果相同）
                     Spacer(

@@ -13,7 +13,7 @@ android {
     namespace = "io.movieclaw.androidtv"
     compileSdk = 37
     defaultConfig {
-        applicationId = "io.movieclaw.androidtv"
+        applicationId = "io.movieclaw.androidtv.diag"
         minSdk = 23
         targetSdk = 37
         versionName = versions.getProperty("versionName")
