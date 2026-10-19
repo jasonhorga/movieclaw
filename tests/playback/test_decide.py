@@ -1713,9 +1713,78 @@ def test_base_layer_needs_an_hdr_display():
     assert decision.video.tone_map is True
 
 
-def test_profile_7_falls_back_only_where_the_client_declares_it():
-    # ExoPlayer 只对 P8（和 P4）改用 HEVC 解码器解基础层，P7 不在申报里：照旧转码
-    assert decide_playback(dv(7, True), HDR10_TV, WITH_GPU).tier is PlaybackTier.HARDWARE_TRANSCODE
+#: 真机快照（Android 9 投影仪，ExoPlayer）：屏幕报 HDR10 / HLG，HEVC 硬解到 2176p，
+#: 没有杜比视界解码器——ExoPlayer 只对 P4 / P8 退回 HEVC 解码器，申报里没有 P7
+PROJECTOR = _replace(
+    EXOPLAYER,
+    video=(VideoSupport("h264"), VideoSupport("hevc", max_height=2176)),
+    hdr_passthrough=True,
+    dolby_vision_base_layer_profiles=frozenset({4, 8}),
+)
+
+
+@pytest.mark.parametrize("policy", [NO_GPU, WITH_GPU])
+def test_profile_7_remuxes_to_the_hdr10_base_layer(policy):
+    """P7 的基础层就是 HDR10：没有显卡也不该拒绝（真机曾被「需要显卡做色调映射」拒播）。
+    原文件 ExoPlayer 放不了，只给剥掉增强层与 RPU 的换封装，不给直出"""
+    decision = decide_playback(dv(7, True), PROJECTOR, policy)
+    assert isinstance(decision, PlaybackPlan), decision
+    assert decision.tier is PlaybackTier.REMUX, decision.reason
+    assert decision.video.action == "copy"
+    assert decision.video.dolby_vision == "strip"
+    assert "HDR10 基础层" in decision.reason
+    assert needs_keyframe_probe(dv(7, True), PROJECTOR, policy)
+
+
+def test_profile_7_base_layer_survives_an_audio_transcode():
+    """音轨要转码时视频照样 copy，同样只给基础层"""
+    source = media(**{**vars(dv(7, True)), "audio_tracks": (DTS_51,)})
+    decision = decide_playback(source, PROJECTOR, NO_GPU)
+    assert decision.tier is PlaybackTier.AUDIO_TRANSCODE, decision.reason
+    assert decision.video.dolby_vision == "strip"
+
+
+def test_profile_7_base_layer_needs_an_hdr_display_and_a_compatible_base_layer():
+    """屏幕不能直出 HDR、或基础层不兼容：照旧色调映射，没有显卡就拒绝"""
+    sdr = _replace(PROJECTOR, hdr_passthrough=False)
+    rejected = decide_playback(dv(7, True), sdr, NO_GPU)
+    assert isinstance(rejected, PlaybackRejected)
+    assert "Dolby Vision" in rejected.reason
+    transcoded = decide_playback(dv(7, True), sdr, WITH_GPU)
+    assert transcoded.tier is PlaybackTier.HARDWARE_TRANSCODE and transcoded.video.tone_map
+    for compatible in (False, None):
+        assert isinstance(decide_playback(dv(7, compatible), PROJECTOR, NO_GPU), PlaybackRejected)
+
+
+def test_profile_7_follows_what_the_client_declares():
+    """播放器自己申报能退回 P7 基础层的，照原来直出原文件，不剥层"""
+    declared = _replace(PROJECTOR, dolby_vision_base_layer_profiles=frozenset({4, 7, 8}))
+    decision = decide_playback(dv(7, True), declared, NO_GPU)
+    assert decision.tier is PlaybackTier.DIRECT_PLAY
+    assert decision.video.dolby_vision is None
+
+
+def test_profile_5_is_not_stripped_to_its_base_layer():
+    """P5 的基础层是 IPTPQc2，剥掉 RPU 当 HDR10 放就是绿紫画面：仍要色调映射"""
+    assert isinstance(decide_playback(dv(5, False), PROJECTOR, NO_GPU), PlaybackRejected)
+    assert decide_playback(dv(5, False), PROJECTOR, WITH_GPU).video.dolby_vision == "apply"
+
+
+def test_profile_7_bluray_clips_go_through_the_server_remux():
+    """原盘按剪辑直推时播放器读的是原码流：P7 也走服务端换封装，LPCM 不补直通能力"""
+    player = _replace(PROJECTOR, bluray_clips=True)
+    disc = media(
+        **{
+            **vars(dv(7, True)),
+            "container": "bluray",
+            "disc_clips": 1,
+            "disc_format": "bluray",
+            "audio_tracks": (BLURAY_LPCM,),
+        },
+    )
+    decision = decide_playback(disc, player, NO_GPU)
+    assert decision.disc is None and decision.video.dolby_vision == "strip"
+    assert decision.audio.action == "transcode"
 
 
 def test_unknown_profile_and_old_clients_keep_transcoding():

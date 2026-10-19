@@ -255,7 +255,9 @@ ffmpeg -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device <dev>
      源为 SDR                               → 无约束
      源为 HDR10/HLG 且 hdr.dynamicRange=high 且视频可 copy → 直通
      源为 DV P5                             → 必须转码 + tone-map（见 §7-④）
-     源为 DV P7                             → 丢弃 EL 层后按 HDR10 处理
+     源为 DV P7（基础层兼容）且可直出 HDR    → 换封装剥掉 EL 与 RPU（NAL 63/62）、打 hvc1，
+                                              按 HDR10 直通（不给原文件：ExoPlayer 解不了 P7
+                                              时不退回 HEVC 解码器）；播放器申报了 P7 的照申报
      需 tone-map 但无可用 GPU               → 拒绝，reason 说明原因
                                               （软件 tone-map 4K 是幻灯片，不硬撑）
 
