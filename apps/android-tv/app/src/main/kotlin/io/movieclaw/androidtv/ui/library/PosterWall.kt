@@ -28,6 +28,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,9 +41,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import io.movieclaw.androidtv.LocalGraph
 import io.movieclaw.androidtv.ui.components.Text
 import io.movieclaw.core.model.generated.FavoriteItemView
 import io.movieclaw.core.model.generated.LibraryItemView
@@ -162,21 +165,28 @@ internal class WallLoader {
 /**
  * 海报墙的焦点滚动：第一排（标题行还露着时）一律滚回最顶，标题不被顶出去；其余只滚到露全、上下留边。
  * Lazy 网格没有绝对滚动量，用标题行（第 0 项）在可见区里的位置判断。
+ * 焦点只在海报上：挂片名时海报下面还要多露出 [trailingPx]（片名那一截），最后一排的片名才不被屏幕下沿裁掉。
  */
-private class WallBringIntoViewSpec(private val grid: LazyGridState, private val marginPx: Float, private val snapPx: Float) : BringIntoViewSpec {
+private class WallBringIntoViewSpec(
+    private val grid: LazyGridState,
+    private val marginPx: Float,
+    private val snapPx: Float,
+    private val trailingPx: () -> Float,
+) : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         val info = grid.layoutInfo
         val header = info.visibleItemsInfo.firstOrNull { it.index == 0 }
         if (header != null && offset < header.offset.y + header.size.height + snapPx) {
             return (header.offset.y - info.beforeContentPadding).toFloat()
         }
-        return minimalScroll(offset, size, containerSize, marginPx)
+        return minimalScroll(offset, size + trailingPx(), containerSize, marginPx)
     }
 }
 
 /**
  * 海报墙（TVPosterWall，媒体库、合集、「查看全部」共用）：大标题 + 灰色总数 + 右边这一页自己的按钮，
- * 下面 5 列海报（不挂片名），背景是焦点那一部的剧照（模糊压暗，停稳 0.2 秒再换）。
+ * 下面 5 列海报（默认不挂片名；「谁在看」页打开「海报标题」后每张下面挂片名与年份、行距加大），
+ * 背景是焦点那一部的剧照（模糊压暗，停稳 0.2 秒再换）。
  * 选中一部进详情，落点库优先用条目自带的 library_id。
  */
 @Composable
@@ -193,8 +203,12 @@ internal fun PosterWall(
     val router = LocalRouter.current
     val scope = rememberCoroutineScope()
     val ptPx = LocalDensity.current.density * 0.5f
+    val graph = LocalGraph.current
+    val titles = graph.wallTitles
+    // 挂片名时说明行有多高：从海报卡量出来（卡片总高减去海报）
+    var captionPx by remember { mutableFloatStateOf(0f) }
     val grid = rememberLazyGridState()
-    val spec = remember(grid) { WallBringIntoViewSpec(grid, 60 * ptPx, 60 * ptPx) }
+    val spec = remember(grid) { WallBringIntoViewSpec(grid, 60 * ptPx, 60 * ptPx) { if (graph.wallTitles) captionPx else 0f } }
     var focusedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var pageFocused by remember { mutableStateOf(false) }
     val requesters = remember { HashMap<Long, FocusRequester>() }
@@ -233,25 +247,28 @@ internal fun PosterWall(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = McMetrics.Edge, end = McMetrics.Edge, top = McMetrics.PushedTop + 20.pt, bottom = 80.pt),
                 horizontalArrangement = Arrangement.spacedBy(WallLayout.COLUMN_SPACING.pt),
-                verticalArrangement = Arrangement.spacedBy(WallLayout.ROW_SPACING.pt),
+                verticalArrangement = Arrangement.spacedBy(WallLayout.rowSpacing(titles)),
             ) {
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
-                    // 标题行与网格之间 36（网格行距 40，这里收回 4）
-                    WallHeader(title, subtitle, Modifier.shrinkBottom((4 * ptPx).toInt()), accessory)
+                    // 标题行与网格之间 36（网格行距 40，这里收回 4；挂片名时行距加大，收回的也跟着多，标题行下仍是 36）
+                    val shrink = WallLayout.rowSpacing(titles) - 36.pt
+                    WallHeader(title, subtitle, Modifier.shrinkBottom((shrink.value * LocalDensity.current.density).toInt()), accessory)
                 }
                 if (items != null) {
                     itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
                         PosterCard(
                             image = item.poster,
                             title = item.title,
-                            subtitle = item.year?.toString(),
+                            // 没有年份也占住副标题那一行：挂片名时每排一样高，行距不参差
+                            subtitle = item.year?.toString().orEmpty(),
                             onClick = {
                                 (item.libraryId ?: fallbackLibrary)?.let { router.push(Route.Item(it, item.id)) }
                             },
-                            modifier = Modifier.focusRequester(req(item.id)).onFocusChanged { if (it.isFocused) focusedId = item.id },
+                            modifier = Modifier.focusRequester(req(item.id)).onFocusChanged { if (it.isFocused) focusedId = item.id }
+                                .then(if (titles) Modifier.onSizeChanged { captionPx = maxOf(captionPx, WallLayout.captionHeight(it)) } else Modifier),
                             width = WallLayout.POSTER_WIDTH.pt,
                             widthPt = WallLayout.POSTER_WIDTH,
-                            caption = CaptionMode.Hidden,
+                            caption = if (titles) CaptionMode.Always else CaptionMode.Hidden,
                         )
                         // 滚到最后一排时接着取下一页
                         if (index >= items.size - WallLayout.COLUMNS) {

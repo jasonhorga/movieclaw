@@ -30,17 +30,18 @@ internal class MarginBringIntoViewSpec(private val marginPx: Float) : BringIntoV
 
 /**
  * 竖向页面：焦点在头部附近（[topSnapPx] 以内）时直接滚回最顶，标题不被顶出去；其余按 [minimalScroll]。
- * [scrollValue] 是当前滚动量（像素）。
+ * [scrollValue] 是当前滚动量（像素）；[trailingPx] 是焦点控件下方还要一起露出来的高度（海报下挂的片名，像素）。
  */
 internal class TopSnapBringIntoViewSpec(
     private val marginPx: Float,
     private val topSnapPx: Float,
+    private val trailingPx: () -> Float = { 0f },
     private val scrollValue: () -> Float,
 ) : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         val s = scrollValue()
         if (s + offset < topSnapPx) return -s
-        return minimalScroll(offset, size, containerSize, marginPx)
+        return minimalScroll(offset, size + trailingPx(), containerSize, marginPx)
     }
 }
 

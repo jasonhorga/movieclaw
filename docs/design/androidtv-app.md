@@ -37,9 +37,9 @@
 | 找服务器 | 局域网发现（Jellyfin 兼容 UDP 7359，单播扫本网段 /24）+ 手填地址；候选地址过 `GET /health` 才算数；低于最低服务器版本直接说明 | `udp 7359`、`GET /health`、`GET /auth/bootstrap` |
 | 扫码登录（默认） | 电视显示二维码 + 配对码，手机扫码批准；按 `interval` 轮询 | `POST /auth/device/authorize`、`POST /auth/device/token`、`GET /auth/me` |
 | 账号密码（兜底） | 电视屏幕键盘输入 | `POST /auth/device/login`（`kind: androidtv`） |
-| 谁在看 / 多账号 | 侧边栏第一项；跨服务器切换 = 换令牌、不联网、整棵界面树与 `AppGraph` 重建；启动直接进上次的账号 | 本机存储；退出登录 `DELETE /auth/devices/current`（失败入队重试） |
+| 谁在看 / 多账号 | 侧边栏第一项；跨服务器切换 = 换令牌、不联网、整棵界面树与 `AppGraph` 重建；启动直接进上次的账号。底部一行「关于」「自动播放预告」「海报标题」「检查更新」「退出登录」：电视上没有设置页，仅有的两项本机设置（都默认关）就是这两个开关 | 本机存储；退出登录 `DELETE /auth/devices/current`（失败入队重试） |
 | 首页 | 首屏是跟着焦点走的「接下来继续」大图区，下面接用户在网页自定义的行 | `GET /playback/up-next`、`GET /ui/preferences`（只读）、各行取数（库 / 类型 / 合集 / 收藏 / 按类型找）、`GET /libraries/showcase` |
-| 媒体库海报墙 | 从首页「我的媒体库」行进；筛选只留排序、只看未看、类型；每页 60 条、短页即止 | `GET /libraries?scope=all`、`GET /libraries/{id}/items`、`GET /libraries/kinds/{kind}/items` |
+| 媒体库海报墙 | 从首页「我的媒体库」行进；筛选只留排序、只看未看、类型；每页 60 条、短页即止。版式同 tvOS `TVWallLayout`（5 列、左右 24 上下 40、海报下不挂片名）；「谁在看」页打开「海报标题」后，媒体库、合集、「查看全部」、影人页的每张海报下挂片名（接口给的标题，一行省略）与年份，列数不变，行距加到 40 与「聚焦放大探出 + 片名上距 24」中的大者（约 49），按焦点滚动连片名一起露出 | `GET /libraries?scope=all`、`GET /libraries/{id}/items`、`GET /libraries/kinds/{kind}/items` |
 | 条目详情 | 大剧照 + 片名 Logo + 事实行 + 主按钮「继续 mm:ss」；季、分集横排、演职员；版本、标记已看 / 收藏 | `GET /libraries/{lid}/items/{id}`、`…/episodes`、`GET /playback/resume`、`GET/POST /playback/marks`、`GET /people/{id}` |
 | 搜索 | 屏幕键盘 + 系统语音输入，只搜媒体库 | `GET /search/library` |
 | 播放 | §4、§5 | `/playback/sessions` 一族 |

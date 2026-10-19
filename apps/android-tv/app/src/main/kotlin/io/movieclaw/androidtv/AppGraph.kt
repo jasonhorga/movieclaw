@@ -72,6 +72,18 @@ class AppGraph(app: Application) {
         store.putString(AUTO_PREVIEW, if (on) "on" else null)
     }
 
+    /**
+     * 海报墙（媒体库、合集、「查看全部」、影人页）每张海报下挂片名与年份（「谁在看」页底部的开关）。默认关，同 Apple TV 只摆海报；
+     * 很多海报上只有英文 / 艺术字或干脆没字，认不出是哪部时打开
+     */
+    var wallTitles by mutableStateOf(store.string(WALL_TITLES) == "on")
+        private set
+
+    fun saveWallTitles(on: Boolean) {
+        wallTitles = on
+        store.putString(WALL_TITLES, if (on) "on" else null)
+    }
+
     /** 调试包：实验台让正在放的播放器跳到某个文件时间（毫秒，`am start … --el mc_seek_ms`），量跳转耗时用 */
     val labSeeks = kotlinx.coroutines.flow.MutableSharedFlow<Long>(extraBufferCapacity = 4)
 
@@ -80,6 +92,7 @@ class AppGraph(app: Application) {
 }
 
 private const val AUTO_PREVIEW = "stage_auto_preview"
+private const val WALL_TITLES = "wall_titles"
 
 /** 一个已登录账号的一切：服务器、令牌、带令牌的接口、会话（权限）。 */
 class AccountSession(val server: ServerAddress, val token: String, val session: SessionView, val api: McApi) {

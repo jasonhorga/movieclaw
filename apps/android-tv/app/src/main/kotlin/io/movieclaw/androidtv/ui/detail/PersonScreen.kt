@@ -19,6 +19,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,11 +31,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.max
 import io.movieclaw.androidtv.ui.components.Text
+import io.movieclaw.androidtv.LocalGraph
 import io.movieclaw.androidtv.LocalSession
 import io.movieclaw.core.model.generated.PersonCreditView
 import io.movieclaw.core.model.generated.PersonView
@@ -59,12 +65,28 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-/** 海报墙版式（TVWallLayout）：一屏 5 列，左右间距 24、上下 40，5 张加 4 个间距铺满安全区内的 1760 点 */
+/**
+ * 海报墙版式（TVWallLayout）：一屏 5 列，左右间距 24、上下 40，5 张加 4 个间距铺满安全区内的 1760 点。
+ * 「谁在看」页打开「海报标题」后海报下挂片名与年份，列数不变、行距按 [rowSpacing] 加大。
+ */
 internal object WallLayout {
     const val COLUMNS = 5
     const val COLUMN_SPACING = 24
     const val ROW_SPACING = 40
     const val POSTER_WIDTH = (1920f - 80 * 2 - (COLUMNS - 1) * COLUMN_SPACING) / COLUMNS
+
+    /** 海报（2:3）聚焦放大 [McMetrics.FocusZoom] 倍时上下各探出的高度（点），约 25 */
+    const val ZOOM_OVERHANG = POSTER_WIDTH * 1.5f * (McMetrics.FocusZoom - 1) / 2
+
+    /**
+     * 行距（片名之下到下一排海报）。不挂片名时 40；挂片名时下一排聚焦放大、往上探出 [ZOOM_OVERHANG] 后，
+     * 离上一排片名仍至少留出片名与自己海报之间那么宽（[McMetrics.CaptionSpacing]），片名不会看着像下一排的
+     */
+    fun rowSpacing(titles: Boolean): Dp =
+        if (titles) max(ROW_SPACING.pt, ZOOM_OVERHANG.pt + McMetrics.CaptionSpacing) else ROW_SPACING.pt
+
+    /** 海报卡量出来的说明行高度（像素）：卡片总高减去 2:3 的海报；不挂片名时为 0 */
+    fun captionHeight(card: IntSize): Float = (card.height - card.width * 1.5f).coerceAtLeast(0f)
 }
 
 @Stable
@@ -91,7 +113,8 @@ private class PersonState(private val api: McApi, private val tmdbId: Long) {
 
 /**
  * 影人页（TVPersonView）：这个人在我库里的作品。头部（圆头像 + 姓名 + 原名 + 「库内 12 部 · 参演 10 · 执导 2」）随路由带过来，
- * 一打开就是全的；作品与海报墙同一套版式（5 列、海报下不挂字），饰演的角色收进海报底部只在焦点时浮现的暗带里。
+ * 一打开就是全的；作品与海报墙同一套版式（5 列、海报下默认不挂字，「海报标题」开着时挂片名与年份），
+ * 饰演的角色收进海报底部只在焦点时浮现的暗带里。
  * 从哪部片点进来的那张标「本片」，按确认退回；文件已删的置灰、点不进去。
  */
 @Composable
@@ -107,8 +130,14 @@ fun PersonScreen(route: Route.Person) {
     val requesters = remember { HashMap<String, FocusRequester>() }
     fun req(key: String) = requesters.getOrPut(key) { FocusRequester() }
     val ptPx = LocalDensity.current.density * 0.5f
+    val graph = LocalGraph.current
+    val titles = graph.wallTitles
+    // 挂片名时按焦点滚动要连片名一起露出来（焦点只在海报上）：量出说明行有多高
+    var captionPx by remember { mutableFloatStateOf(0f) }
     val scroll = rememberScrollState()
-    val spec = remember(scroll) { TopSnapBringIntoViewSpec(60 * ptPx, 300 * ptPx) { scroll.value.toFloat() } }
+    val spec = remember(scroll) {
+        TopSnapBringIntoViewSpec(60 * ptPx, 300 * ptPx, trailingPx = { if (graph.wallTitles) captionPx else 0f }) { scroll.value.toFloat() }
+    }
 
     LaunchedEffect(state) { if (state.person == null) state.load() }
 
@@ -171,8 +200,10 @@ fun PersonScreen(route: Route.Person) {
                     else -> Credits(
                         person = person,
                         fromItem = route.fromItem,
+                        titles = titles,
                         cardModifier = { key ->
                             Modifier.focusRequester(req(key)).onFocusChanged { if (it.isFocused) focusKey = key }
+                                .then(if (titles) Modifier.onSizeChanged { captionPx = maxOf(captionPx, WallLayout.captionHeight(it)) } else Modifier)
                         },
                         onSelect = { credit ->
                             val libraryId = credit.libraryId
@@ -228,11 +259,12 @@ private fun PersonHeader(route: Route.Person, person: PersonView?) {
     }
 }
 
-/** 参演 / 执导两段；只有一种身份时不写段标题。每段按 5 张一排，每排是一个焦点区 */
+/** 参演 / 执导两段；只有一种身份时不写段标题。每段按 5 张一排，每排是一个焦点区；[titles] 时海报下挂片名与年份 */
 @Composable
 private fun Credits(
     person: PersonView,
     fromItem: Long?,
+    titles: Boolean,
     cardModifier: (String) -> Modifier,
     onSelect: (PersonCreditView) -> Unit,
 ) {
@@ -249,7 +281,7 @@ private fun Credits(
                     Text("${part.credits.size} 部", style = McType.Callout, color = McColors.Secondary, modifier = Modifier.alignByBaseline())
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(WallLayout.ROW_SPACING.pt)) {
+            Column(verticalArrangement = Arrangement.spacedBy(WallLayout.rowSpacing(titles))) {
                 part.credits.chunked(WallLayout.COLUMNS).forEach { row ->
                     Row(
                         Modifier.fillMaxWidth().focusSection().focusGroup(),
@@ -263,8 +295,9 @@ private fun Credits(
                                 modifier = cardModifier(creditKey(credit)).alpha(if (credit.libraryId == null) 0.45f else 1f),
                                 width = WallLayout.POSTER_WIDTH.pt,
                                 widthPt = WallLayout.POSTER_WIDTH,
-                                subtitle = credit.year?.toString(),
-                                caption = CaptionMode.Hidden,
+                                // 没有年份也占住副标题那一行：挂片名时每排一样高
+                                subtitle = credit.year?.toString().orEmpty(),
+                                caption = if (titles) CaptionMode.Always else CaptionMode.Hidden,
                                 badge = if (credit.mediaItemId == fromItem) "本片" else null,
                                 focusDetail = PersonLogic.focusDetail(credit),
                             )

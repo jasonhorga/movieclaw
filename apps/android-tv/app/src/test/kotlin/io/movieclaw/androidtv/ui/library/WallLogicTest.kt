@@ -1,9 +1,13 @@
 package io.movieclaw.androidtv.ui.library
 
+import androidx.compose.ui.unit.IntSize
 import io.movieclaw.androidtv.ui.detail.WallLayout
+import io.movieclaw.androidtv.ui.theme.McMetrics
+import io.movieclaw.androidtv.ui.theme.pt
 import io.movieclaw.androidtv.ui.shell.WallSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WallLogicTest {
@@ -109,5 +113,25 @@ class WallLogicTest {
     @Test
     fun wallLayout() {
         assertEquals(332.8f, WallLayout.POSTER_WIDTH, 0.001f)
+    }
+
+    @Test
+    fun rowSpacingWithTitles() {
+        // 不挂片名：版式不变，仍是 40
+        assertEquals(40.pt, WallLayout.rowSpacing(titles = false))
+        // 挂片名：下一排聚焦放大往上探出约 25，离上一排片名仍留出片名上距 24
+        assertEquals(24.96f, WallLayout.ZOOM_OVERHANG, 0.001f)
+        val spaced = WallLayout.rowSpacing(titles = true)
+        assertEquals((WallLayout.ZOOM_OVERHANG.pt + McMetrics.CaptionSpacing).value, spaced.value, 0.001f)
+        assertEquals(48.96f, spaced.value * 2, 0.01f)
+        assertTrue(spaced > WallLayout.rowSpacing(titles = false))
+    }
+
+    @Test
+    fun captionHeightFromCardSize() {
+        // 1080p 下 1pt = 1px：333 宽的海报高 499.5，下面挂两行字
+        assertEquals(100.5f, WallLayout.captionHeight(IntSize(333, 600)), 0.001f)
+        // 不挂片名（只有海报，取整差一点）不算负数
+        assertEquals(0f, WallLayout.captionHeight(IntSize(333, 499)), 0.001f)
     }
 }
